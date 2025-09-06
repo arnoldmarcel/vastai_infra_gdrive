@@ -101,16 +101,46 @@ need_cmd "$PYTHON_BIN" || { sudo add-apt-repository -y ppa:deadsnakes/ppa || tru
 log "rclone Remote ($GDRIVE_REMOTE) …"
 mkdir -p "$HOME/.config/rclone"
 RCONF="$HOME/.config/rclone/rclone.conf"
-if [ ! -f "$RCONF" ] || ! in_file "\[$GDRIVE_REMOTE\]" "$RCONF"; then
-  # Falls Client-ID/Secret leer sind, legt rclone ein Standard-Remote an; Auth folgt einmalig interaktiv
+
+echo "==> rclone Remote prüfen ($GDRIVE_REMOTE) …"
+mkdir -p "$HOME/.config/rclone"
+RCONF="$HOME/.config/rclone/rclone.conf"
+
+remote_exists() {
+  [ -f "$RCONF" ] && grep -qE "^\[$GDRIVE_REMOTE\]" "$RCONF"
+}
+
+if ! remote_exists; then
+  echo "==> Remote '$GDRIVE_REMOTE' fehlt – starte Headless-OAuth."
+  echo "    Du bekommst gleich eine URL. Öffne sie lokal im Browser, autorisiere,"
+  echo "    und kopiere den Verifizierungscode zurück ins Terminal."
+
+  # Headless-OAuth erzwingen: rclone zeigt URL + Eingabeaufforderung
+  # (mit Client-ID/Secret falls gesetzt; sonst rclone-Defaults)
   rclone config create "$GDRIVE_REMOTE" drive \
     ${RCLONE_CLIENT_ID:+client_id "$RCLONE_CLIENT_ID"} \
     ${RCLONE_CLIENT_SECRET:+client_secret "$RCLONE_CLIENT_SECRET"} \
     scope "drive" \
-    ${GDRIVE_ROOT_FOLDER_ID:+root_folder_id "$GDRIVE_ROOT_FOLDER_ID"} \
-    config_is_local true || true
-  echo ">>> Falls eine Auth-URL erscheint: öffnen, Login, Code zurückgeben (einmalig)."
+    config_is_local true
+
+  # Manche rclone-Versionen legen den Remote an, verlangen aber anschließend
+  # noch das eigentliche OAuth-Token: reconnect triggert erneut die URL.
+  if ! remote_exists; then
+    echo "==> Erzeuge/aktualisiere OAuth-Token (reconnect) …"
+    rclone config reconnect "${GDRIVE_REMOTE}:" || true
+  fi
+
+  if remote_exists; then
+    echo "==> Remote '$GDRIVE_REMOTE' ist eingerichtet."
+  else
+    echo "!! Konnte Remote nicht einrichten. Führe notfalls manuell aus:"
+    echo "   rclone config"
+    exit 1
+  fi
+else
+  echo "==> Remote '$GDRIVE_REMOTE' vorhanden – weiter."
 fi
+
 
 # ===== GDrive mounten =====
 log "Mount $GDRIVE_MOUNT …"
