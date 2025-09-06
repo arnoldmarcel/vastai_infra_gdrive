@@ -112,29 +112,22 @@ remote_exists() {
 
 if ! remote_exists; then
   echo "==> Remote '$GDRIVE_REMOTE' fehlt – starte Headless-OAuth."
-  echo "    Du bekommst gleich eine URL. Öffne sie lokal im Browser, autorisiere,"
-  echo "    und kopiere den Verifizierungscode zurück ins Terminal."
+  echo "    Es erscheint gleich ein *Google*-Link. Im Browser öffnen, anmelden,"
+  echo "    und den Verifizierungscode hier einfügen."
 
-  # Headless-OAuth erzwingen: rclone zeigt URL + Eingabeaufforderung
-  # (mit Client-ID/Secret falls gesetzt; sonst rclone-Defaults)
   rclone config create "$GDRIVE_REMOTE" drive \
     ${RCLONE_CLIENT_ID:+client_id "$RCLONE_CLIENT_ID"} \
     ${RCLONE_CLIENT_SECRET:+client_secret "$RCLONE_CLIENT_SECRET"} \
     scope "drive" \
-    config_is_local true
+    config_is_local false   # <-- WICHTIG: Headless erzwingen
 
-  # Manche rclone-Versionen legen den Remote an, verlangen aber anschließend
-  # noch das eigentliche OAuth-Token: reconnect triggert erneut die URL.
-  if ! remote_exists; then
-    echo "==> Erzeuge/aktualisiere OAuth-Token (reconnect) …"
-    rclone config reconnect "${GDRIVE_REMOTE}:" || true
-  fi
+  # Falls das Token noch fehlt, zwinge den (erneuten) Headless-Auth-Dialog:
+  rclone config reconnect "${GDRIVE_REMOTE}:" || true
 
   if remote_exists; then
     echo "==> Remote '$GDRIVE_REMOTE' ist eingerichtet."
   else
-    echo "!! Konnte Remote nicht einrichten. Führe notfalls manuell aus:"
-    echo "   rclone config"
+    echo "!! Konnte Remote nicht einrichten. Führe notfalls manuell aus:  rclone config"
     exit 1
   fi
 else
