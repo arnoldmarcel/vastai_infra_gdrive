@@ -1,4 +1,4 @@
-# ComfyUI Infra Scripts
+# VastAI ComfyUI Infra Scripts
 
 Skripte zum Aufsetzen/Restoren/Beenden einer ComfyUI-Instanz auf Vast.ai Ubuntu 24.04 mit Google Drive (rclone).
 
