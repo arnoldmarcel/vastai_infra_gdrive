@@ -22,10 +22,10 @@ RCLONE_LOG_FILE="$RCLONE_LOG_DIR/mount.log"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-Backups/ComfyUI}"
 
 # Model-/Workflow-Ziele (bleiben symlinked)
-GDRIVE_MODELS_DIR="$GDRIVE_MOUNT/models"
-GDRIVE_WORKFLOWS_DIR="$GDRIVE_MOUNT/workflows"
-GDRIVE_INPUT_DIR="$GDRIVE_MOUNT/input"
-GDRIVE_OUTPUT_DIR="$GDRIVE_MOUNT/output"
+GDRIVE_MODELS_DIR="$GDRIVE_MOUNT/ComfyUI/models"
+GDRIVE_WORKFLOWS_DIR="$GDRIVE_MOUNT/ComfyUI/workflows"
+GDRIVE_INPUT_DIR="$GDRIVE_MOUNT/ComfyUI/input"
+GDRIVE_OUTPUT_DIR="$GDRIVE_MOUNT/ComfyUI/output"
 
 # === Helpers ===
 need_cmd(){ command -v "$1" >/dev/null 2>&1; }
