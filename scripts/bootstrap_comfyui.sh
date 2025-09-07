@@ -96,7 +96,7 @@ start_comfy(){
 # === System vorbereiten ===
 log "Systempakete …"
 sudo apt-get update -y
-sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
+#sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
 sudo apt-get install -y git curl ca-certificates fuse3 software-properties-common jq
 need_cmd rclone || sudo apt-get install -y rclone
 
