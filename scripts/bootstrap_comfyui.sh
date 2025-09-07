@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# === Config laden ===
+# === Config laden (optional via .env) ===
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 [ -f "$REPO_ROOT/.env" ] && set -a && source "$REPO_ROOT/.env" && set +a
-# Defaults
+
+# === Defaults ===
 GDRIVE_REMOTE="${GDRIVE_REMOTE:-gdrive}"
-GDRIVE_ROOT_FOLDER_ID="${GDRIVE_ROOT_FOLDER_ID:-}"
-RCLONE_CLIENT_ID="${RCLONE_CLIENT_ID:-}"
-RCLONE_CLIENT_SECRET="${RCLONE_CLIENT_SECRET:-}"
+GDRIVE_ROOT_FOLDER_ID="${GDRIVE_ROOT_FOLDER_ID:-}"           # optional
+RCLONE_CLIENT_ID="${RCLONE_CLIENT_ID:-}"                     # optional
+RCLONE_CLIENT_SECRET="${RCLONE_CLIENT_SECRET:-}"             # optional
+
 COMFY_DIR="${COMFY_DIR:-$HOME/ComfyUI}"
 PORT="${PORT:-8188}"
 PYTHON_BIN="${PYTHON_BIN:-python3.12}"
+VENV_DIR="$COMFY_DIR/.venv"
+
 GDRIVE_MOUNT="${GDRIVE_MOUNT:-$HOME/gdrive}"
 RCLONE_LOG_DIR="${RCLONE_LOG_DIR:-$HOME/rclone_logs}"
 RCLONE_LOG_FILE="$RCLONE_LOG_DIR/mount.log"
 REMOTE_BACKUP_DIR="${REMOTE_BACKUP_DIR:-Backups/ComfyUI}"
-VENV_DIR="$COMFY_DIR/.venv"
 
+# Model-/Workflow-Ziele (bleiben symlinked)
 GDRIVE_MODELS_DIR="$GDRIVE_MOUNT/models"
 GDRIVE_WORKFLOWS_DIR="$GDRIVE_MOUNT/workflows"
 GDRIVE_INPUT_DIR="$GDRIVE_MOUNT/input"
 GDRIVE_OUTPUT_DIR="$GDRIVE_MOUNT/output"
 
+# === Helpers ===
 need_cmd(){ command -v "$1" >/dev/null 2>&1; }
-in_file(){ grep -qE "^$1" "$2"; }
 log(){ echo "[$(date +'%H:%M:%S')] $*"; }
 
 restore_from_latest_backup(){
@@ -36,7 +40,8 @@ restore_from_latest_backup(){
   log "Backup: $latest"
   local tmp="/tmp/${latest##*/}"
   rclone copy "${GDRIVE_REMOTE}:${REMOTE_BACKUP_DIR}/${latest}" /tmp --progress
-  tar -xzpf "$tmp" -C "$HOME/.."
+  mkdir -p "$(dirname "$COMFY_DIR")"
+  tar -xzpf "$tmp" -C "$(dirname "$COMFY_DIR")"
 }
 
 ensure_symlinks(){
@@ -60,6 +65,7 @@ fresh_setup(){
   [ -d "$VENV_DIR" ] || "$PYTHON_BIN" -m venv "$VENV_DIR"
   "$VENV_DIR/bin/python" -m pip install --upgrade pip wheel setuptools
   [ -f "$COMFY_DIR/requirements.txt" ] && "$VENV_DIR/bin/pip" install -r "$COMFY_DIR/requirements.txt"
+
   mkdir -p "$COMFY_DIR/custom_nodes"
   if [ ! -d "$COMFY_DIR/custom_nodes/ComfyUI-Manager/.git" ]; then
     git clone https://github.com/ltdrdata/ComfyUI-Manager.git "$COMFY_DIR/custom_nodes/ComfyUI-Manager"
@@ -87,7 +93,7 @@ start_comfy(){
   exec "$VENV_DIR/bin/python" main.py --listen 0.0.0.0 --port "$PORT"
 }
 
-# ===== System vorbereiten =====
+# === System vorbereiten ===
 log "Systempakete …"
 sudo apt-get update -y
 sudo DEBIAN_FRONTEND=noninteractive apt-get upgrade -y
@@ -95,59 +101,75 @@ sudo apt-get install -y git curl ca-certificates fuse3 software-properties-commo
 need_cmd rclone || sudo apt-get install -y rclone
 
 log "Python 3.12 …"
-need_cmd "$PYTHON_BIN" || { sudo add-apt-repository -y ppa:deadsnakes/ppa || true; sudo apt-get update -y; sudo apt-get install -y python3.12 python3.12-venv python3.12-dev; }
+if ! need_cmd "$PYTHON_BIN"; then
+  sudo add-apt-repository -y ppa:deadsnakes/ppa || true
+  sudo apt-get update -y
+  sudo apt-get install -y python3.12 python3.12-venv python3.12-dev
+fi
 
-# ===== rclone Remote =====
+# === rclone Remote (Headless-OAuth erzwungen) ===
 log "rclone Remote ($GDRIVE_REMOTE) …"
 mkdir -p "$HOME/.config/rclone"
 RCONF="$HOME/.config/rclone/rclone.conf"
 
-echo "==> rclone Remote prüfen ($GDRIVE_REMOTE) …"
-mkdir -p "$HOME/.config/rclone"
-RCONF="$HOME/.config/rclone/rclone.conf"
-
-remote_exists() {
-  [ -f "$RCONF" ] && grep -qE "^\[$GDRIVE_REMOTE\]" "$RCONF"
-}
+remote_exists() { [ -f "$RCONF" ] && grep -qE "^\[$GDRIVE_REMOTE\]" "$RCONF"; }
 
 if ! remote_exists; then
   echo "==> Remote '$GDRIVE_REMOTE' fehlt – starte Headless-OAuth."
   echo "    Es erscheint gleich ein *Google*-Link. Im Browser öffnen, anmelden,"
   echo "    und den Verifizierungscode hier einfügen."
 
+  export RCLONE_CONFIG_IS_LOCAL=false
   rclone config create "$GDRIVE_REMOTE" drive \
     ${RCLONE_CLIENT_ID:+client_id "$RCLONE_CLIENT_ID"} \
     ${RCLONE_CLIENT_SECRET:+client_secret "$RCLONE_CLIENT_SECRET"} \
+    ${GDRIVE_ROOT_FOLDER_ID:+root_folder_id "$GDRIVE_ROOT_FOLDER_ID"} \
     scope "drive" \
-    config_is_local false   # <-- WICHTIG: Headless erzwingen
+    config_is_local false
 
-  # Falls das Token noch fehlt, zwinge den (erneuten) Headless-Auth-Dialog:
+  # Falls Token fehlt → erneut Headless-Auth anstoßen
   rclone config reconnect "${GDRIVE_REMOTE}:" || true
 
   if remote_exists; then
     echo "==> Remote '$GDRIVE_REMOTE' ist eingerichtet."
   else
-    echo "!! Konnte Remote nicht einrichten. Führe notfalls manuell aus:  rclone config"
+    echo "!! Konnte Remote nicht einrichten. Notfall: manuell 'rclone config' ausführen."
     exit 1
   fi
 else
   echo "==> Remote '$GDRIVE_REMOTE' vorhanden – weiter."
 fi
 
-
-# ===== GDrive mounten =====
+# === GDrive mounten (mit RC-Server für vfs/flush) ===
 log "Mount $GDRIVE_MOUNT …"
 mkdir -p "$GDRIVE_MOUNT" "$RCLONE_LOG_DIR"
 mount | grep -q "on $GDRIVE_MOUNT type fuse.rclone" && fusermount3 -u "$GDRIVE_MOUNT" || true
+
+# Für viele kleine Files hilft ein höheres FD-Limit (optional)
+ulimit -n 1048576 || true
+
 rclone mount "$GDRIVE_REMOTE:" "$GDRIVE_MOUNT" \
-  --daemon --vfs-cache-mode full --vfs-cache-max-size 100G \
-  --buffer-size 64M --transfers 4 --checkers 8 \
-  --dir-cache-time 30s --poll-interval 15s \
-  --log-file "$RCLONE_LOG_FILE" --log-level INFO
-sleep 2
+  --daemon \
+  --vfs-cache-mode full \
+  --vfs-cache-max-size 100G \
+  --buffer-size 64M \
+  --transfers 4 \
+  --checkers 8 \
+  --dir-cache-time 30s \
+  --poll-interval 15s \
+  --log-file "$RCLONE_LOG_FILE" \
+  --log-level INFO \
+  --rc --rc-addr=127.0.0.1:5572 --rc-no-auth
+
+# Readiness-Loop
+for i in {1..10}; do
+  if mount | grep -q "on $GDRIVE_MOUNT type fuse.rclone"; then break; fi
+  sleep 1
+done
+
 mkdir -p "$GDRIVE_MODELS_DIR" "$GDRIVE_WORKFLOWS_DIR" "$GDRIVE_INPUT_DIR" "$GDRIVE_OUTPUT_DIR"
 
-# ===== Abfrage Restore? =====
+# === Abfrage Restore? ===
 echo
 read -r -p "ComfyUI aus dem neuesten Backup wiederherstellen? [j/N]: " REPLY
 REPLY="${REPLY:-N}"
@@ -161,6 +183,7 @@ fi
 
 ensure_symlinks
 
+# SSH-Key (nur falls noch keiner existiert)
 [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" >/dev/null
 
 torch_probe
